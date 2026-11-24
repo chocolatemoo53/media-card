@@ -234,11 +234,23 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
 .th .ic{width:26px;height:26px}
 .th.pic .ic{display:none}
 .it.mc-artist .th{border-radius:50%}
+.bapps{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
+.ap{display:flex;align-items:center;gap:10px;min-width:0;padding:8px 10px;border-radius:12px;text-align:left;
+  background:color-mix(in srgb,currentColor 6%,transparent);transition:background .2s,transform .25s var(--m53-ease,cubic-bezier(.2,.8,.2,1))}
+.ap:hover{background:color-mix(in srgb,currentColor 11%,transparent)}
+.ap:active{transform:scale(.97)}
+.ap.tap{animation:apTap .8s ease}
+@keyframes apTap{30%{box-shadow:0 0 0 2px var(--primary-color)}}
+.ap .av{flex:none;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;font-size:13px;font-weight:700;
+  background:color-mix(in srgb,var(--primary-color) 22%,transparent);color:var(--primary-color)}
+.ap .an{font-size:13px;font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .it.mc-app .th,.it.mc-directory .th,.it.mc-app .th.pic{background-size:contain;background-origin:content-box;padding:16%;box-sizing:border-box}
 .it:hover .th{transform:translateY(-2px)}
 .nm{font-size:12.5px;font-weight:600;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.pl{position:absolute;right:6px;bottom:6px;width:32px;height:32px;border-radius:50%;background:var(--primary-color);color:#fff;opacity:0;transform:translateY(4px);transition:opacity .2s,transform .2s;box-shadow:0 4px 12px rgba(0,0,0,.3)}
-.pl .ic{width:16px;height:16px;display:block!important;transform:translateX(1px)}
+.th>.pl,.th>.qa{position:absolute;bottom:6%;width:clamp(22px,24%,30px);height:auto;aspect-ratio:1;padding:0;margin:0;box-sizing:border-box;display:grid;place-items:center;border-radius:50%;font-size:0;line-height:0;cursor:pointer}
+.pl{right:6%;background:var(--primary-color);color:var(--text-primary-color,#fff);opacity:0;transform:translateY(4px);transition:opacity .2s,transform .2s;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.th>.pl .ic,.th>.qa .ic{width:56%;height:auto;aspect-ratio:1}
+.pl .ic{display:block!important;margin-left:8%}
 .it:hover .pl,.it:focus-within .pl{opacity:1;transform:none}
 @media (hover:none){.pl{opacity:.95;transform:none}}
 .blist{display:flex;flex-direction:column;gap:2px}
@@ -252,6 +264,9 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
 .busyov{display:none;position:absolute;inset:0;align-items:center;justify-content:center;border-radius:inherit;background:rgba(0,0,0,.5);--m53-spinner-color:#fff}
 .busy>.th>.busyov,.busy>.ri>.busyov{display:flex}
 .bmsg{padding:18px 4px;font-size:14px;color:var(--secondary-text-color)}
+.bwake .bmsg{padding-bottom:10px}
+.bdevs{display:flex;flex-wrap:wrap;gap:6px;padding:0 4px 8px}
+.bdev>.loader{display:none}.bdev.busy{color:transparent}.bdev.busy>.loader{display:block;--m53-spinner-color:var(--primary-text-color)}
 .bsearch{display:flex;align-items:center;gap:8px;height:40px;margin-top:14px;padding:0 4px 0 12px;border-radius:12px;background:color-mix(in srgb,currentColor 8%,transparent);color:var(--secondary-text-color);cursor:text}
 .bsearch.hide{display:none}
 .bsearch .ic{width:18px;height:18px}
@@ -274,7 +289,7 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
 .qa.ok .i-ok,.qa.err .i-err{display:block!important}
 .qa.ok{color:var(--primary-color)}
 .qa.err{color:var(--error-color,#db4437)}
-.th .qa{position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.55);color:#fff;opacity:0;transform:translateY(4px);box-shadow:0 4px 12px rgba(0,0,0,.3);--m53-spinner-color:#fff}
+.th .qa{left:6%;background:rgba(0,0,0,.55);color:#fff;opacity:0;transform:translateY(4px);box-shadow:0 4px 12px rgba(0,0,0,.3);--m53-spinner-color:#fff}
 .th .qa:hover{background:rgba(0,0,0,.75);color:#fff}
 .th .qa.ok{background:var(--primary-color)}
 .th .qa.err{background:var(--error-color,#db4437);color:#fff}
@@ -456,31 +471,41 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       if (node) this._bstack.push(node); else { this._bstack.length = 0; this._bstack.push({ id: null, type: null, title: 'Library' }); }
       const cur = this._bstack[this._bstack.length - 1];
       const root = cur.id == null;
+      const tv = !!KEYS[this._family(this._p)] && ent === this._p.entity;
+      const ms = this._st({ entity: ent }); const canBrowse = !!ms && has(ms, F.BROWSE);
+      const asleep = !canBrowse && this._asleep(ms);
+      this._bcap = `${ent}|${canBrowse}`;
       this._bsaved = null;
       const body = this.$('bbody'); const token = (this._btok = (this._btok || 0) + 1);
       this._searchMode().then((m) => {
         if (this._p.entity !== self) return;
         this.$('bsw').classList.toggle('hide', !m);
         this.$('bq').placeholder = m && m.kind === 'spotify' ? 'Search Spotify' : 'Search music';
-        if (root && !m && token === this._btok) body.innerHTML = '<div class="bmsg">Search isn\u2019t available for this player.</div>';
+        if (root && !m && !tv && !canBrowse && !asleep && token === this._btok) body.innerHTML = '<div class="bmsg">Search isn\u2019t available for this player.</div>';
       });
       this.$('bhead').classList.toggle('hide', root);
       this.$('btitle').textContent = cur.title || '';
       this.$('bback').classList.toggle('hide', this._bstack.length < 2);
       if (root) {
-        this._bitems = [];
         const q = this.$('bq').value.trim();
-        if (q.length >= 2) this._search(q);
-        else body.innerHTML = '<div class="bmsg">Search for a song, artist, album or playlist.</div>';
-        return;
+        if (q.length >= 2) { this._bitems = []; body.innerHTML = ''; this._search(q); return; }
+        if (tv) { await this._tvApps(ent, body, token); return; }
+        if (!canBrowse) {
+          this._bitems = [];
+          body.innerHTML = asleep ? this._asleepHtml(ms) : '<div class="bmsg">Search for a song, artist, album or playlist.</div>';
+          return;
+        }
       }
       body.innerHTML = `<div class="bmsg load">${spin(0.4)}Loading\u2026</div>`;
       let res;
       try {
-        const msg = { type: 'media_player/browse_media', entity_id: ent, media_content_id: cur.id, media_content_type: cur.type };
+        const msg = { type: 'media_player/browse_media', entity_id: ent };
+        if (!root) { msg.media_content_id = cur.id; msg.media_content_type = cur.type; }
         res = await this._hass.callWS(msg);
       } catch (e) {
-        if (token === this._btok) body.innerHTML = `<div class="bmsg">Couldn't open this. ${esc((e && e.message) || '')}</div>`;
+        if (token !== this._btok) return;
+        body.innerHTML = root && this._asleep(this._st({ entity: ent })) ? this._asleepHtml(this._st({ entity: ent }))
+          : `<div class="bmsg">Couldn't open this. ${esc((e && e.message) || '')}</div>`;
         return;
       }
       if (token !== this._btok) return;
@@ -489,6 +514,53 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       this._bitems = items;
       if (!items.length) { body.innerHTML = '<div class="bmsg">Nothing here yet.</div>'; return; }
       body.innerHTML = this._itemsHtml(items);
+      body.scrollTop = 0;
+    }
+    _asleep(ms) { return !!ms && ms.state !== 'unavailable' && has(ms, F.SOURCE) && !has(ms, F.PLAY_MEDIA) && this._family({ entity: ms.entity_id }) === 'spotify'; }
+    _asleepHtml(ms) {
+      const devs = ms.attributes.source_list || [];
+      const why = ms.state === 'idle' ? 'Spotify isn\u2019t active on any device right now.' : `Spotify can\u2019t be controlled on ${esc(ms.attributes.source || 'this device')}.`;
+      if (!devs.length) return `<div class="bmsg">${why} Open Spotify on a phone, computer or speaker, then come back here.</div>`;
+      return `<div class="bwake"><div class="bmsg">${why} Pick a device to connect to and your library will open here.</div>
+        <div class="bdevs">${devs.map((d) => `<button class="app bdev" data-dev="${esc(d)}">${esc(d)}${spin(0.3)}</button>`).join('')}</div></div>`;
+    }
+    _until(test, ms = 8000) {
+      return new Promise((res) => {
+        const t0 = Date.now();
+        const tick = () => { if (test()) res(true); else if (Date.now() - t0 > ms) res(false); else setTimeout(tick, 250); };
+        tick();
+      });
+    }
+    async _wake(ent, dev) {
+      const ms = this._st({ entity: ent });
+      if (!this._asleep(ms)) return true;
+      const list = ms.attributes.source_list || [];
+      dev = dev && list.includes(dev) ? dev : (this._wakeDev && list.includes(this._wakeDev) ? this._wakeDev : list[0]);
+      if (!dev) throw new Error('No Spotify device is online.');
+      this._wakeDev = dev;
+      await this._hass.callService('media_player', 'select_source', { entity_id: ent, source: dev });
+      if (await this._until(() => { const s = this._st({ entity: ent }); return !!s && has(s, F.PLAY_MEDIA); })) return true;
+      throw new Error(`${dev} didn\u2019t respond. Is Spotify open there?`);
+    }
+    async _playMedia(c) {
+      const ent = this._mp();
+      this._waking = true;
+      try { await this._wake(ent); } finally { this._waking = false; }
+      const s = this._st(); if (this._busyEl) this._busyTitle = s ? s.attributes.media_title : null;
+      return this._hass.callService('media_player', 'play_media', { entity_id: ent, media_content_id: c.media_content_id, media_content_type: c.media_content_type });
+    }
+    async _tvApps(ent, body, token) {
+      body.innerHTML = `<div class="bmsg load">${spin(0.4)}Loading\u2026</div>`;
+      let apps = [];
+      try {
+        const r = await this._hass.callWS({ type: 'media_player/browse_media', entity_id: ent });
+        const dir = (r.children || []).find((c) => c.media_content_type === 'apps' || /^apps$/i.test(c.title));
+        if (dir) { const r2 = await this._hass.callWS({ type: 'media_player/browse_media', entity_id: ent, media_content_id: dir.media_content_id, media_content_type: dir.media_content_type }); apps = (r2.children || []).filter((c) => c.can_play || c.can_expand || c.media_class === 'app'); }
+      } catch (e) {}
+      if (token !== this._btok) return;
+      if (!apps.length) { const s = this._st(); apps = ((s && s.attributes.source_list) || []).filter((x) => x !== 'Home').map((x) => ({ title: x, media_class: 'app', _source: true })); }
+      this._bitems = apps;
+      body.innerHTML = apps.length ? this._itemsHtml(apps) : '<div class="bmsg">No apps reported by this player.</div>';
       body.scrollTop = 0;
     }
     async _searchMode() {
@@ -512,7 +584,7 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
         else this._browse(null);
         return;
       }
-      if (!this._bsaved && !drilled) this._bsaved = { html: body.innerHTML, items: this._bitems };
+      if (!this._bsaved && !drilled && body.innerHTML && !body.querySelector('.load')) this._bsaved = { html: body.innerHTML, items: this._bitems };
       body.innerHTML = `<div class="bmsg load">${spin(0.4)}Searching\u2026</div>`;
       const mode = await this._searchMode();
       if (token !== this._btok) return;
@@ -569,6 +641,9 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
     }
     _itemsHtml(items, start = 0, forceList = false) {
       const src = (u) => (u && u.startsWith('/') ? this._hass.hassUrl(u) : u);
+      if (!forceList && items.length && items.every((c) => c.media_class === 'app' && !c.thumbnail && !c.can_expand)) {
+        return `<div class="bapps">${items.map((c, i) => `<button class="ap" data-k="${start + i}" title="${esc(c.title)}"><span class="av">${esc((String(c.title).replace(/[^\p{L}\p{N}]/gu, '')[0] || '\u2022').toUpperCase())}</span><span class="an">${esc(c.title)}</span></button>`).join('')}</div>`;
+      }
       const grid = !forceList && items.filter((c) => c.thumbnail).length >= items.length / 2;
       const icon = (c) => svg(c.media_class === 'directory' ? 'folder' : 'note');
       const enq = this._canEnq();
@@ -737,16 +812,34 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       };
       $('bback').onclick = () => { if (this._bstack && this._bstack.length > 1) { this._bstack.pop(); this._browse(this._bstack.pop() || null); } };
       $('bbody').addEventListener('click', (e) => {
+        const dv = e.target.closest('[data-dev]');
+        if (dv) {
+          if (dv.classList.contains('busy')) return;
+          dv.classList.add('busy');
+          this._wake(this._mp(), dv.dataset.dev).then(() => { if (this._bcap !== `${this._mp()}|true`) this._browse(null); }, (err) => {
+            dv.classList.remove('busy');
+            const m = this.$('bbody').querySelector('.bwake .bmsg'); if (m) m.textContent = (err && err.message) || 'Couldn\u2019t connect.';
+          });
+          return;
+        }
         const b = e.target.closest('[data-k]'); if (!b || !this._bitems) return;
         const c = this._bitems[+b.dataset.k]; if (!c) return;
         const qa = e.target.closest('.qa'); if (qa) { this._enqueue(c, qa); return; }
         const playOnly = !!e.target.closest('.pl');
         if (c.can_expand && !playOnly) { this._browse({ id: c.media_content_id, type: c.media_content_type, title: c.title }); return; }
+        if (c.media_class === 'app' && !c.can_play) {
+          const ps = this._st(), list = (ps && ps.attributes.source_list) || [];
+          if (c._source || list.includes(c.title)) this._call('media_player', 'select_source', { entity_id: this._p.entity, source: c.title });
+          else this._call('media_player', 'play_media', { entity_id: this._mp(), media_content_id: c.media_content_id, media_content_type: c.media_content_type || 'app' });
+          b.classList.remove('tap'); void b.offsetWidth; b.classList.add('tap');
+          return;
+        }
         if (c.can_play) {
-          this._call('media_player', 'play_media', { entity_id: this._mp(), media_content_id: c.media_content_id, media_content_type: c.media_content_type });
           this._clearBusy(); b.classList.add('busy'); this._busyEl = b;
           const bs = this._st(); this._busyTitle = bs ? bs.attributes.media_title : null;
-          clearTimeout(this._busyT); this._busyT = setTimeout(() => this._clearBusy(), 5000);
+          clearTimeout(this._busyT); this._busyT = setTimeout(() => this._clearBusy(), 12000);
+          this._playMedia(c).then(() => { clearTimeout(this._busyT); this._busyT = setTimeout(() => this._clearBusy(), 5000); },
+            (err) => { console.warn('m53-media-card: play failed', err); if (this._busyEl === b) this._clearBusy(); });
         }
       });
       const bq = $('bq');
@@ -957,10 +1050,15 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       card.classList.toggle('off', off);
       card.classList.toggle('playing', this._eff(s) === 'playing');
       card.classList.toggle('open', this._open && !!this._remote() && !!KEYS[this._family()]);
-      const ms = this._st({ entity: this._mp() }); const canLib = !!ms && has(ms, F.PLAY_MEDIA) && (has(ms, F.BROWSE) || has(ms, F.SEARCH)) && ms.state !== 'unavailable' && this._opt('show_library', true) !== false;
+      const ms = this._st({ entity: this._mp() }); const asleep = this._asleep(ms);
+      const canLib = !!ms && ((has(ms, F.PLAY_MEDIA) && (has(ms, F.BROWSE) || has(ms, F.SEARCH))) || asleep) && ms.state !== 'unavailable' && this._opt('show_library', true) !== false;
       $('lb').classList.toggle('on', canLib);
       card.classList.toggle('lib-open', this._libOpen && canLib);
-      if (this._libOpen && canLib && (!this._bstack || this._bstack.ent !== this._mp())) this._browse(null);
+      if (this._libOpen && canLib) {
+        const stale = !this._bstack || this._bstack.ent !== this._mp();
+        const flipped = !stale && this._bcap !== `${this._mp()}|${has(ms, F.BROWSE)}` && this._bstack.length <= 1 && this.$('bq').value.trim().length < 2;
+        if (stale || flipped) this._browse(null);
+      }
       $('shuf').style.display = has(s, F.SHUFFLE) && !off ? '' : 'none';
       $('rep').style.display = has(s, F.REPEAT) && !off ? '' : 'none';
       $('shuf').classList.toggle('act', !!a.shuffle);
@@ -972,6 +1070,11 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       $('pwr').style.display = (has(s, F.ON) || has(s, F.OFF) || this._remote()) ? '' : 'none';
       let title = a.media_title, sub = [a.media_artist, a.media_album_name].filter(Boolean).join(' · ');
       if (!title) { title = a.app_name || a.source || (off ? 'Off' : st === 'idle' ? 'Idle' : 'On'); sub = off ? (st === 'unavailable' ? 'Not reachable' : '') : (a.app_name && a.source && a.source !== a.app_name ? a.source : (a.app_name ? '' : '')); }
+      if (!a.media_title && this._asleep(s)) {
+        const n = (a.source_list || []).length;
+        title = 'Not playing';
+        sub = n ? (canLib ? 'Pick a device or open the library to start' : 'Pick a device to start') : 'No Spotify devices online';
+      }
       if (!sub && !off && a.app_name && a.media_title) sub = a.app_name;
       if (!sub && off) sub = this._name(p);
       $('ti').textContent = title; $('su').textContent = sub;
@@ -1001,7 +1104,7 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
           img.src = pic;
         }
       }
-      if (this._busyEl && a.media_title !== this._busyTitle) this._clearBusy();
+      if (this._busyEl && !this._waking && a.media_title !== this._busyTitle) this._clearBusy();
       this._pendCheck(s); this._pendUi();
       $('pp').classList.toggle('is', this._eff(s) === 'playing');
       $('pp').disabled = !(has(s, F.PAUSE) || has(s, F.PLAY));
@@ -1031,4 +1134,4 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
   if (!window.customCards.some((c) => c.type === 'm53-media-card'))
     window.customCards.push({ type: 'm53-media-card', name: 'M53 Media', description: 'Every player in one card: now playing, synced lyrics, library and search, and a remote.', preview: true });
 })();
-console.info('%c M53 MEDIA CARD %c 2.2.0 ', 'background:#f2a65a;color:#111;font-weight:700;border-radius:3px 0 0 3px', 'background:#333;color:#fff;border-radius:0 3px 3px 0');
+console.info('%c M53 MEDIA CARD %c 2.2.1 ', 'background:#f2a65a;color:#111;font-weight:700;border-radius:3px 0 0 3px', 'background:#333;color:#fff;border-radius:0 3px 3px 0');
