@@ -627,7 +627,10 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
     }
     _canEnq() {
       const ms = this._st({ entity: this._mp() });
-      return !!ms && has(ms, F.ENQUEUE) && ms.state !== 'unavailable' && this._opt('show_queue', true) !== false;
+      if (!ms || ms.state === 'unavailable' || this._opt('show_queue', true) === false) return false;
+      if (has(ms, F.ENQUEUE)) return true;
+      // HA's Spotify integration accepts enqueue=add for tracks/episodes but doesn't advertise MEDIA_ENQUEUE
+      return has(ms, F.PLAY_MEDIA) && this._family({ entity: ms.entity_id }) === 'spotify' ? 'spotify' : false;
     }
     async _enqueue(c, el) {
       if (el.classList.contains('busy')) return;
@@ -647,7 +650,7 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       const grid = !forceList && items.filter((c) => c.thumbnail).length >= items.length / 2;
       const icon = (c) => svg(c.media_class === 'directory' ? 'folder' : 'note');
       const enq = this._canEnq();
-      const qa = (c) => (enq && c.can_play ? `<span class="qa" role="button" aria-label="Add ${esc(c.title)} to queue" title="Add to queue">${svg('queue', 'i-q')}${svg('check', 'i-ok')}${svg('x', 'i-err')}${spin(0.3)}</span>` : '');
+      const qa = (c) => (enq && c.can_play && (enq !== 'spotify' || /(track|episode|music)$/.test(c.media_content_type || '')) ? `<span class="qa" role="button" aria-label="Add ${esc(c.title)} to queue" title="Add to queue">${svg('queue', 'i-q')}${svg('check', 'i-ok')}${svg('x', 'i-err')}${spin(0.3)}</span>` : '');
       const bg = (c) => (c.thumbnail ? `style="background-image:url('${esc(src(c.thumbnail))}')"` : '');
       if (grid) {
         return `<div class="bgrid">${items.map((c, i) => `<button class="it mc-${esc(c.media_class)}" data-k="${start + i}" title="${esc(c.title)}">

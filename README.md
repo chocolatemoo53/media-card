@@ -6,7 +6,7 @@ It's a single file with no dependencies and works with any theme.
 
 - **Now playing:** artwork that adapts to its shape (album covers, app logos, posters), progress, volume and sources.
 - **Lyrics:** time-synced lyrics from [LRCLIB](https://lrclib.net). Tap a line to jump to it. They work with whatever the player reports as the current song.
-- **Library and search:** browse playlists, albums and artists, then tap to play. Results are grouped into Songs, Artists, Albums and Playlists.
+- **Library and search:** browse playlists, albums and artists, then tap to play, or use the queue button on a song to line it up after the current one (Spotify and players that support queuing, like Music Assistant). Results are grouped into Songs, Artists, Albums and Playlists.
 - **Remote:** a swipe pad, Back, Home and Menu buttons, and app shortcuts. Supports Roku, Apple TV, Android TV / Fire TV and Xbox.
 
 ## Install
