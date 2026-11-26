@@ -14,8 +14,11 @@ script:
     description: >-
       Finds a movie or TV show by name and starts it on a TV (Roku, Apple TV or Fire TV) in a streaming
       app that has it, preferring options included with a subscription or free over renting or buying,
-      and on a Roku, apps that are installed. Use it when someone asks to watch or put on a show or movie.
-      Returns the matched title, year and the app it opened in.
+      and on a Roku, apps that are installed. Use it whenever someone asks to play, watch or put on a TV
+      show or movie, including "play Severance on the bedroom TV". It is the only way to start a show or
+      movie: the TVs can't search, and media search only finds music, so it plays soundtracks instead.
+      Pass the TV's name or room as the user said it, for example "Bedroom Apple TV" or "living room".
+      Returns the matched title, year, TV and the app it opened in, or an error to tell the user.
     fields:
       title:
         name: Title
@@ -26,11 +29,10 @@ script:
           text:
       player:
         name: TV
-        description: The TV media player to play it on (a Roku, Apple TV or Fire TV media_player entity).
+        description: The TV to play it on, by name, room or media_player entity ID, for example "Bedroom Apple TV".
         required: true
         selector:
-          entity:
-            domain: media_player
+          text:
       kind:
         name: Kind
         description: Optional. "movie" or "show", to tell apart titles with the same name.
@@ -44,30 +46,50 @@ script:
           text:
     sequence:
       - variables:
+          found: >-
+            {%- set tvs = (integration_entities('roku') + integration_entities('apple_tv') + integration_entities('androidtv')) | select('match', 'media_player[.]') | list -%}
+            {%- set want = (player | default('', true) | string | lower | replace('media_player.', '')) | slugify -%}
+            {%- set ns = namespace(exact=[], part=[], area=[]) -%}
+            {%- for e in tvs -%}
+              {%- set ids = [e.split('.')[1], state_attr(e, 'friendly_name') | default('', true) | slugify] | select | list -%}
+              {%- set a = area_name(e) | default('', true) | slugify -%}
+              {%- if want in ids -%}{%- set ns.exact = ns.exact + [e] -%}
+              {%- elif want and (ids | select('search', want) | list or ids | select('in', want) | list) -%}{%- set ns.part = ns.part + [e] -%}
+              {%- elif want and a and a in want -%}{%- set ns.area = ns.area + [e] -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {%- set hits = ns.exact or ns.part or ns.area -%}
+            {%- set on = hits | reject('is_state', ['off', 'standby', 'unavailable', 'unknown']) | list -%}
+            {%- set tv = hits[0] if hits | count == 1 else on[0] if on | count == 1 else '' -%}
+            {{ {'tv': tv, 'options': (hits or tvs) | map('state_attr', 'friendly_name') | list} }}
+      - variables:
+          tv: "{{ found.tv }}"
           platform: >-
-            {{ 'ROKU_OS' if player in integration_entities('roku')
-               else 'TVOS' if player in integration_entities('apple_tv')
-               else 'ANDROID_TV' if player in integration_entities('androidtv') else '' }}
+            {{ 'ROKU_OS' if found.tv in integration_entities('roku')
+               else 'TVOS' if found.tv in integration_entities('apple_tv')
+               else 'ANDROID_TV' if found.tv in integration_entities('androidtv') else '' }}
           query: >-
             query S($q:String!,$c:Country!,$l:Language!,$p:Platform!){popularTitles(country:$c,first:8,filter:{searchQuery:$q}){edges{node{id objectType content(country:$c,language:$l){title originalReleaseYear posterUrl} offers(country:$c,platform:WEB){monetizationType deeplink:deeplinkURL(platform:$p) package{clearName packageId icon}}}}}}
       - if: "{{ platform == '' }}"
         then:
-          - stop: "That player isn't a Roku, Apple TV or Fire TV."
-            error: true
+          - variables:
+              result: "{{ {'error': 'Not sure which TV. Ask the user to pick one of: ' ~ found.options | join(', ')} }}"
+          - stop: Not started
+            response_variable: result
       - variables:
           installed: []
       - if: "{{ platform == 'ROKU_OS' }}"
         then:
           - action: media_player.browse_media
             target:
-              entity_id: "{{ player }}"
+              entity_id: "{{ tv }}"
             data:
               media_content_type: apps
               media_content_id: ""
             response_variable: apps
             continue_on_error: true
           - variables:
-              installed: "{{ ((apps or {}).get(player, {}).get('children') or []) | map(attribute='media_content_id') | list }}"
+              installed: "{{ ((apps or {}).get(tv, {}).get('children') or []) | map(attribute='media_content_id') | list }}"
       - action: rest_command.m53_watch_search
         data:
           body: >-
@@ -97,12 +119,16 @@ script:
                 'link': ns.best.link if ns.best else '', 'app': ns.best.app if ns.best else ''} }}
       - if: "{{ not pick.title }}"
         then:
-          - stop: "Couldn't find {{ title }}."
-            error: true
+          - variables:
+              result: "{{ {'error': 'Could not find ' ~ title} }}"
+          - stop: Not started
+            response_variable: result
       - if: "{{ not pick.link }}"
         then:
-          - stop: "{{ pick.title }} isn't streaming in an app this TV can open."
-            error: true
+          - variables:
+              result: "{{ {'error': pick.title ~ ' is not streaming in an app this TV can open'} }}"
+          - stop: Not started
+            response_variable: result
       - choose:
           - conditions: "{{ platform == 'ROKU_OS' }}"
             sequence:
@@ -119,7 +145,7 @@ script:
                     {{ {'app': m[0][0] if m else '', 'extra': ns.extra} }}
               - action: media_player.play_media
                 target:
-                  entity_id: "{{ player }}"
+                  entity_id: "{{ tv }}"
                 data:
                   media_content_type: app
                   media_content_id: "{{ roku.app }}"
@@ -128,23 +154,25 @@ script:
             sequence:
               - if: "{{ pick.link is not match('^[!-~]+$') or \"'\" in pick.link }}"
                 then:
-                  - stop: "Got an unsafe link, not opening it."
-                    error: true
+                  - variables:
+                      result: "{{ {'error': 'Got an unsafe link, not opening it'} }}"
+                  - stop: Not started
+                    response_variable: result
               - action: androidtv.adb_command
                 target:
-                  entity_id: "{{ player }}"
+                  entity_id: "{{ tv }}"
                 data:
                   command: "am start '{{ pick.link }}'"
         default:
           - action: media_player.play_media
             target:
-              entity_id: "{{ player }}"
+              entity_id: "{{ tv }}"
             data:
               media_content_type: url
               media_content_id: "{{ pick.link }}"
           - variables:
-              remote: "{{ device_entities(device_id(player)) | select('match', 'remote[.]') | first | default('') }}"
-          - if: "{{ remote != '' }}"
+              remote: "{{ device_entities(device_id(tv)) | select('match', 'remote[.]') | first | default('') }}"
+          - if: "{{ remote != '' and not pick.link.startswith('https://tv.apple.com/') }}"
             then:
               - delay: 2
               - action: remote.send_command
@@ -153,6 +181,6 @@ script:
                 data:
                   command: select
       - variables:
-          result: "{{ {'title': pick.title, 'year': pick.year, 'app': pick.app} }}"
+          result: "{{ {'title': pick.title, 'year': pick.year, 'tv': state_attr(tv, 'friendly_name'), 'app': pick.app} }}"
       - stop: Started
         response_variable: result

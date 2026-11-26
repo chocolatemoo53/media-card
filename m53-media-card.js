@@ -693,7 +693,7 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       }
       const r = this._remote();
       return this._hass.callService('media_player', 'play_media', { entity_id: ent, media_content_id: link, media_content_type: 'url' }).then(() => {
-        if (r) setTimeout(() => this._call('remote', 'send_command', { entity_id: r, command: 'select' }), 2000);
+        if (r && !link.startsWith('https://tv.apple.com/')) setTimeout(() => this._call('remote', 'send_command', { entity_id: r, command: 'select' }), 2000);
       });
     }
     _canEnq() {
