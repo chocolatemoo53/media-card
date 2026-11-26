@@ -30,8 +30,6 @@
   const svg = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${I[n]}"/></svg>`;
   const spin = (size = 0.4, cls = '') => `<span class="loader ${cls}" style="--size:${size}px" role="status" aria-label="Loading"></span>`;
 
-  // Title lookup for TVs: JustWatch returns ready-made deep links per TV platform. Its API only allows
-  // browser calls from its own site, so the card asks Home Assistant to make the call (rest_command.m53_watch_search).
   const WATCH = { roku: 'ROKU_OS', apple_tv: 'TVOS', androidtv: 'ANDROID_TV' };
   const JW_QUERY = 'query S($q:String!,$c:Country!,$l:Language!,$p:Platform!){popularTitles(country:$c,first:8,filter:{searchQuery:$q}){edges{node{id objectType content(country:$c,language:$l){title originalReleaseYear posterUrl} offers(country:$c,platform:WEB){monetizationType deeplink:deeplinkURL(platform:$p) package{clearName packageId icon}}}}}}';
   const OFFER = { FLATRATE: [0, 'Included with subscription'], FREE: [1, 'Free'], ADS: [1, 'Free with ads'], RENT: [3, 'Rent'], BUY: [4, 'Buy'] };
@@ -149,7 +147,6 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
 .sub{margin-top:3px;font-size:14px;color:var(--secondary-text-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bar{margin-top:14px;display:none}
 .bar.on{display:block}
-/* playing but the player reports no duration (e.g. most Roku channels): show activity, not progress */
 .bar.live .fill{width:30%!important;opacity:.5}
 .playing .bar.live .fill{animation:m53live 1.6s ease-in-out infinite alternate}
 @keyframes m53live{from{left:0}to{left:70%}}
@@ -691,13 +688,11 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
         return this._hass.callService('media_player', 'play_media', { entity_id: ent, media_content_id: m[1], media_content_type: 'app', extra });
       }
       if (fam === 'androidtv') {
-        // the link lands inside an adb shell command: refuse anything that could break out of the quotes
         if (!/^[\x21-\x7e]+$/.test(link) || link.includes("'")) return Promise.reject(new Error('Unsafe link.'));
         return this._hass.callService('androidtv', 'adb_command', { entity_id: ent, command: `am start '${link}'` });
       }
       const r = this._remote();
       return this._hass.callService('media_player', 'play_media', { entity_id: ent, media_content_id: link, media_content_type: 'url' }).then(() => {
-        // tvOS asks "Open in <app>?" before following a link; Select presses its default Open button
         if (r) setTimeout(() => this._call('remote', 'send_command', { entity_id: r, command: 'select' }), 2000);
       });
     }
@@ -705,7 +700,6 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       const ms = this._st({ entity: this._mp() });
       if (!ms || ms.state === 'unavailable' || this._opt('show_queue', true) === false) return false;
       if (has(ms, F.ENQUEUE)) return true;
-      // HA's Spotify integration accepts enqueue=add for tracks/episodes but doesn't advertise MEDIA_ENQUEUE
       return has(ms, F.PLAY_MEDIA) && this._family({ entity: ms.entity_id }) === 'spotify' ? 'spotify' : false;
     }
     async _enqueue(c, el) {
@@ -747,7 +741,6 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       const a = s.attributes, g = this._dur;
       if (!g || g.ent !== s.entity_id || g.app !== a.app_id) this._dur = { ent: s.entity_id, app: a.app_id, d: a.media_duration, t: 0 };
       else if (g.d !== a.media_duration) this._dur = { ...g, d: a.media_duration, t: g.d && a.media_duration ? Date.now() : 0 };
-      // live streams like Pluto TV report a "duration" that keeps growing; Roku polls every 10 s and a real video's length never changes
       return Date.now() - this._dur.t < 25000 ? 0 : a.media_duration;
     }
     _setHold(s, pos, play) { this._hold = { ent: s.entity_id, pos, play, at: Date.now(), upd: s.attributes.media_position_updated_at, until: Date.now() + 4000 }; }

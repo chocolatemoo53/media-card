@@ -1,19 +1,8 @@
-# M53 Media Card: "watch" package
-# Lets the card (and Assist) find a show or movie by name and start it on a Roku, Apple TV or Fire TV.
-# Title lookup uses JustWatch, which returns ready-made deep links for each TV platform.
-#
-# Install: put this file in config/packages/ and make sure configuration.yaml has
-#   homeassistant:
-#     packages: !include_dir_named packages
-# then restart Home Assistant. To let Assist use it, expose "Watch on TV" under
-# Settings > Voice assistants > Expose.
-
 rest_command:
   m53_watch_search:
     url: https://apis.justwatch.com/graphql
     method: post
     content_type: application/json
-    # Home Assistant turns a JSON string in action data into a mapping, so turn it back into JSON here
     payload: "{{ body | to_json if body is mapping else body }}"
     timeout: 20
 
@@ -137,7 +126,6 @@ script:
                   extra: "{{ roku.extra }}"
           - conditions: "{{ platform == 'ANDROID_TV' }}"
             sequence:
-              # the link lands inside an adb shell command: refuse anything that could break out of the quotes
               - if: "{{ pick.link is not match('^[!-~]+$') or \"'\" in pick.link }}"
                 then:
                   - stop: "Got an unsafe link, not opening it."
@@ -154,7 +142,6 @@ script:
             data:
               media_content_type: url
               media_content_id: "{{ pick.link }}"
-          # tvOS asks "Open in <app>?" before following a link; Select presses its default Open button
           - variables:
               remote: "{{ device_entities(device_id(player)) | select('match', 'remote[.]') | first | default('') }}"
           - if: "{{ remote != '' }}"
