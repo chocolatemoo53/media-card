@@ -1,0 +1,171 @@
+# M53 Media Card: "watch" package
+# Lets the card (and Assist) find a show or movie by name and start it on a Roku, Apple TV or Fire TV.
+# Title lookup uses JustWatch, which returns ready-made deep links for each TV platform.
+#
+# Install: put this file in config/packages/ and make sure configuration.yaml has
+#   homeassistant:
+#     packages: !include_dir_named packages
+# then restart Home Assistant. To let Assist use it, expose "Watch on TV" under
+# Settings > Voice assistants > Expose.
+
+rest_command:
+  m53_watch_search:
+    url: https://apis.justwatch.com/graphql
+    method: post
+    content_type: application/json
+    # Home Assistant turns a JSON string in action data into a mapping, so turn it back into JSON here
+    payload: "{{ body | to_json if body is mapping else body }}"
+    timeout: 20
+
+script:
+  m53_watch:
+    alias: Watch on TV
+    icon: mdi:television-play
+    mode: queued
+    description: >-
+      Finds a movie or TV show by name and starts it on a TV (Roku, Apple TV or Fire TV) in a streaming
+      app that has it, preferring options included with a subscription or free over renting or buying,
+      and on a Roku, apps that are installed. Use it when someone asks to watch or put on a show or movie.
+      Returns the matched title, year and the app it opened in.
+    fields:
+      title:
+        name: Title
+        description: Name of the movie or TV show, for example "Severance".
+        required: true
+        example: Severance
+        selector:
+          text:
+      player:
+        name: TV
+        description: The TV media player to play it on (a Roku, Apple TV or Fire TV media_player entity).
+        required: true
+        selector:
+          entity:
+            domain: media_player
+      kind:
+        name: Kind
+        description: Optional. "movie" or "show", to tell apart titles with the same name.
+        selector:
+          select:
+            options: [movie, show]
+      country:
+        name: Country
+        description: Optional two-letter country for streaming availability. Defaults to US.
+        selector:
+          text:
+    sequence:
+      - variables:
+          platform: >-
+            {{ 'ROKU_OS' if player in integration_entities('roku')
+               else 'TVOS' if player in integration_entities('apple_tv')
+               else 'ANDROID_TV' if player in integration_entities('androidtv') else '' }}
+          query: >-
+            query S($q:String!,$c:Country!,$l:Language!,$p:Platform!){popularTitles(country:$c,first:8,filter:{searchQuery:$q}){edges{node{id objectType content(country:$c,language:$l){title originalReleaseYear posterUrl} offers(country:$c,platform:WEB){monetizationType deeplink:deeplinkURL(platform:$p) package{clearName packageId icon}}}}}}
+      - if: "{{ platform == '' }}"
+        then:
+          - stop: "That player isn't a Roku, Apple TV or Fire TV."
+            error: true
+      - variables:
+          installed: []
+      - if: "{{ platform == 'ROKU_OS' }}"
+        then:
+          - action: media_player.browse_media
+            target:
+              entity_id: "{{ player }}"
+            data:
+              media_content_type: apps
+              media_content_id: ""
+            response_variable: apps
+            continue_on_error: true
+          - variables:
+              installed: "{{ ((apps or {}).get(player, {}).get('children') or []) | map(attribute='media_content_id') | list }}"
+      - action: rest_command.m53_watch_search
+        data:
+          body: >-
+            {{ {'query': query, 'variables': {'q': title, 'c': (country or 'US') | upper, 'l': 'en', 'p': platform}} | to_json }}
+        response_variable: jw
+      - variables:
+          pick: >-
+            {%- set want = {'movie': 'MOVIE', 'show': 'SHOW'}.get(kind | default('', true), '') -%}
+            {%- set rank = {'FLATRATE': 0, 'FREE': 1, 'ADS': 1, 'RENT': 3, 'BUY': 4} -%}
+            {%- set ns = namespace(best=none, score=99, node=none) -%}
+            {%- for e in (jw.content.data.popularTitles.edges if jw.content is mapping and jw.content.data else []) -%}
+              {%- set n = e.node -%}
+              {%- if ns.node is none and (want == '' or n.objectType == want) -%}
+                {%- set ns.node = n -%}
+                {%- for o in n.offers -%}
+                  {%- set link = o.deeplink -%}
+                  {%- set app = (link | regex_findall('^launch/([0-9]+)') or [''])[0] -%}
+                  {%- set s = rank.get(o.monetizationType, 2) + (10 if installed and app not in installed else 0) -%}
+                  {%- if link and s < ns.score -%}
+                    {%- set ns.best = {'link': link, 'app': o.package.clearName} -%}
+                    {%- set ns.score = s -%}
+                  {%- endif -%}
+                {%- endfor -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ {'title': ns.node.content.title if ns.node else '', 'year': ns.node.content.originalReleaseYear if ns.node else none,
+                'link': ns.best.link if ns.best else '', 'app': ns.best.app if ns.best else ''} }}
+      - if: "{{ not pick.title }}"
+        then:
+          - stop: "Couldn't find {{ title }}."
+            error: true
+      - if: "{{ not pick.link }}"
+        then:
+          - stop: "{{ pick.title }} isn't streaming in an app this TV can open."
+            error: true
+      - choose:
+          - conditions: "{{ platform == 'ROKU_OS' }}"
+            sequence:
+              - variables:
+                  roku: >-
+                    {%- set m = pick.link | regex_findall('^launch/([0-9]+)[?]?(.*)$') -%}
+                    {%- set ns = namespace(extra={}) -%}
+                    {%- for kv in (m[0][1].split('&') if m else []) if '=' in kv -%}
+                      {%- set k, v = kv.split('=', 1) -%}
+                      {%- set v = v | replace('+', ' ') | replace('%3A', ':') | replace('%2F', '/') | replace('%3F', '?') | replace('%3D', '=') | replace('%26', '&') | replace('%25', '%') -%}
+                      {%- if k == 'contentID' -%}{%- set ns.extra = dict(ns.extra, content_id=v) -%}{%- endif -%}
+                      {%- if k == 'MediaType' -%}{%- set ns.extra = dict(ns.extra, media_type=v) -%}{%- endif -%}
+                    {%- endfor -%}
+                    {{ {'app': m[0][0] if m else '', 'extra': ns.extra} }}
+              - action: media_player.play_media
+                target:
+                  entity_id: "{{ player }}"
+                data:
+                  media_content_type: app
+                  media_content_id: "{{ roku.app }}"
+                  extra: "{{ roku.extra }}"
+          - conditions: "{{ platform == 'ANDROID_TV' }}"
+            sequence:
+              # the link lands inside an adb shell command: refuse anything that could break out of the quotes
+              - if: "{{ pick.link is not match('^[!-~]+$') or \"'\" in pick.link }}"
+                then:
+                  - stop: "Got an unsafe link, not opening it."
+                    error: true
+              - action: androidtv.adb_command
+                target:
+                  entity_id: "{{ player }}"
+                data:
+                  command: "am start '{{ pick.link }}'"
+        default:
+          - action: media_player.play_media
+            target:
+              entity_id: "{{ player }}"
+            data:
+              media_content_type: url
+              media_content_id: "{{ pick.link }}"
+          # tvOS asks "Open in <app>?" before following a link; Select presses its default Open button
+          - variables:
+              remote: "{{ device_entities(device_id(player)) | select('match', 'remote[.]') | first | default('') }}"
+          - if: "{{ remote != '' }}"
+            then:
+              - delay: 2
+              - action: remote.send_command
+                target:
+                  entity_id: "{{ remote }}"
+                data:
+                  command: select
+      - variables:
+          result: "{{ {'title': pick.title, 'year': pick.year, 'app': pick.app} }}"
+      - stop: Started
+        response_variable: result

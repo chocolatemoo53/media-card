@@ -30,6 +30,11 @@
   const svg = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${I[n]}"/></svg>`;
   const spin = (size = 0.4, cls = '') => `<span class="loader ${cls}" style="--size:${size}px" role="status" aria-label="Loading"></span>`;
 
+  // Title lookup for TVs: JustWatch returns ready-made deep links per TV platform. Its API only allows
+  // browser calls from its own site, so the card asks Home Assistant to make the call (rest_command.m53_watch_search).
+  const WATCH = { roku: 'ROKU_OS', apple_tv: 'TVOS', androidtv: 'ANDROID_TV' };
+  const JW_QUERY = 'query S($q:String!,$c:Country!,$l:Language!,$p:Platform!){popularTitles(country:$c,first:8,filter:{searchQuery:$q}){edges{node{id objectType content(country:$c,language:$l){title originalReleaseYear posterUrl} offers(country:$c,platform:WEB){monetizationType deeplink:deeplinkURL(platform:$p) package{clearName packageId icon}}}}}}';
+  const OFFER = { FLATRATE: [0, 'Included with subscription'], FREE: [1, 'Free'], ADS: [1, 'Free with ads'], RENT: [3, 'Rent'], BUY: [4, 'Buy'] };
   const KEYS = {
     roku: { up: 'up', down: 'down', left: 'left', right: 'right', ok: 'select', back: 'back', home: 'home', menu: 'info', play: 'play' },
     apple_tv: { up: 'up', down: 'down', left: 'left', right: 'right', ok: 'select', back: 'menu', home: 'home', menu: 'top_menu', play: 'play_pause' },
@@ -144,6 +149,10 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
 .sub{margin-top:3px;font-size:14px;color:var(--secondary-text-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bar{margin-top:14px;display:none}
 .bar.on{display:block}
+/* playing but the player reports no duration (e.g. most Roku channels): show activity, not progress */
+.bar.live .fill{width:30%!important;opacity:.5}
+.playing .bar.live .fill{animation:m53live 1.6s ease-in-out infinite alternate}
+@keyframes m53live{from{left:0}to{left:70%}}
 .track{position:relative;height:6px;border-radius:3px;background:color-mix(in srgb,currentColor 12%,transparent);cursor:pointer;touch-action:none}
 .track.ro{cursor:default}
 .fill{position:absolute;left:0;top:0;bottom:0;border-radius:inherit;background:var(--primary-text-color);width:0}
@@ -234,6 +243,7 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
 .th .ic{width:26px;height:26px}
 .th.pic .ic{display:none}
 .it.mc-artist .th{border-radius:50%}
+.it.mc-movie .th,.it.mc-tv_show .th{aspect-ratio:2/3}
 .bapps{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
 .ap{display:flex;align-items:center;gap:10px;min-width:0;padding:8px 10px;border-radius:12px;text-align:left;
   background:color-mix(in srgb,currentColor 6%,transparent);transition:background .2s,transform .25s var(--m53-ease,cubic-bezier(.2,.8,.2,1))}
@@ -480,12 +490,17 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       this._searchMode().then((m) => {
         if (this._p.entity !== self) return;
         this.$('bsw').classList.toggle('hide', !m);
-        this.$('bq').placeholder = m && m.kind === 'spotify' ? 'Search Spotify' : 'Search music';
+        this.$('bq').placeholder = m && m.kind === 'spotify' ? 'Search Spotify' : m && m.kind === 'watch' ? 'Search shows and movies' : 'Search music';
         if (root && !m && !tv && !canBrowse && !asleep && token === this._btok) body.innerHTML = '<div class="bmsg">Search isn\u2019t available for this player.</div>';
       });
       this.$('bhead').classList.toggle('hide', root);
       this.$('btitle').textContent = cur.title || '';
       this.$('bback').classList.toggle('hide', this._bstack.length < 2);
+      if (cur.items) {
+        this._bitems = cur.items; body.scrollTop = 0;
+        body.innerHTML = cur.items.length ? this._itemsHtml(cur.items, 0, true) : '<div class="bmsg">No streaming app this player can open has it.</div>';
+        return;
+      }
       if (root) {
         const q = this.$('bq').value.trim();
         if (q.length >= 2) { this._bitems = []; body.innerHTML = ''; this._search(q); return; }
@@ -543,6 +558,8 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       throw new Error(`${dev} didn\u2019t respond. Is Spotify open there?`);
     }
     async _playMedia(c) {
+      if (c._link) return this._watchPlay(c);
+      if (c._offers) return this._watchPlay(c._offers[0]);
       const ent = this._mp();
       this._waking = true;
       try { await this._wake(ent); } finally { this._waking = false; }
@@ -558,6 +575,7 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
         if (dir) { const r2 = await this._hass.callWS({ type: 'media_player/browse_media', entity_id: ent, media_content_id: dir.media_content_id, media_content_type: dir.media_content_type }); apps = (r2.children || []).filter((c) => c.can_play || c.can_expand || c.media_class === 'app'); }
       } catch (e) {}
       if (token !== this._btok) return;
+      if (apps.length) this._rApps = { ent, ids: new Set(apps.map((a) => String(a.media_content_id))) };
       if (!apps.length) { const s = this._st(); apps = ((s && s.attributes.source_list) || []).filter((x) => x !== 'Home').map((x) => ({ title: x, media_class: 'app', _source: true })); }
       this._bitems = apps;
       body.innerHTML = apps.length ? this._itemsHtml(apps) : '<div class="bmsg">No apps reported by this player.</div>';
@@ -567,6 +585,8 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       const mp = { entity: this._mp() };
       const s = this._st(mp); if (!s || this._opt('search', true) === false) return null;
       if (has(s, F.SEARCH)) return { kind: 'native' };
+      const rc = this._hass.services && this._hass.services.rest_command;
+      if (WATCH[this._family(mp)] && rc && rc.m53_watch_search) return { kind: 'watch', platform: WATCH[this._family(mp)] };
       if (this._family(mp) !== 'spotify') return null;
       if (this._maEntry === undefined) {
         this._maEntry = null;
@@ -595,6 +615,8 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
           const r = await this._hass.callWS({ type: 'execute_script', sequence: [{ action: 'media_player.search_media', target: { entity_id: ent }, data: { search_query: q }, response_variable: 'r' }, { stop: 'done', response_variable: 'r' }] });
           const res = (((r || {}).response || {})[ent] || {}).result || [];
           groups = groupResults(res.filter((c) => c.can_expand || c.can_play));
+        } else if (mode.kind === 'watch') {
+          groups = await this._watchSearch(q, mode.platform, ent);
         } else {
           const r = await this._hass.callWS({ type: 'execute_script', sequence: [{ action: 'music_assistant.search', data: { config_entry_id: mode.entry, name: q, limit: 12, media_type: ['track', 'artist', 'album', 'playlist'] }, response_variable: 'r' }, { stop: 'done', response_variable: 'r' }] });
           const res = (r || {}).response || {};
@@ -624,6 +646,60 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
         html += `<div class="bsec">${esc(g.title)}</div>` + this._itemsHtml(g.items, start, g.list);
       }
       this._bitems = all; body.innerHTML = html; body.scrollTop = 0;
+    }
+    async _watchSearch(q, platform, ent) {
+      const c = String(this._opt('watch_country', (this._hass.config || {}).country || 'US')).toUpperCase();
+      const key = `${platform}|${c}|${q.toLowerCase()}`;
+      this._wcache = this._wcache || new Map();
+      let d = this._wcache.get(key);
+      if (!d) {
+        const body = JSON.stringify({ query: JW_QUERY, variables: { q, c, l: 'en', p: platform } });
+        const r = await this._hass.callWS({ type: 'execute_script', sequence: [{ action: 'rest_command.m53_watch_search', data: { body }, response_variable: 'r' }, { stop: 'done', response_variable: 'r' }] });
+        d = ((r || {}).response || {}).content || {};
+        if (typeof d === 'string') d = JSON.parse(d);
+        if (d.errors) throw new Error(d.errors[0].message);
+        this._wcache.set(key, d); if (this._wcache.size > 20) this._wcache.delete(this._wcache.keys().next().value);
+      }
+      const img = (u, prof) => (u ? `https://images.justwatch.com${u.replace('{profile}', prof).replace('{format}', 'webp')}` : '');
+      const apps = platform === 'ROKU_OS' && this._rApps && this._rApps.ent === ent && this._rApps.ids.size ? this._rApps.ids : null;
+      const titles = (((d.data || {}).popularTitles || {}).edges || []).map(({ node: n }) => {
+        const seen = new Set();
+        const offers = (n.offers || []).filter((o) => {
+          const link = o.deeplink;
+          if (!link || !o.package || seen.has(o.package.packageId)) return false;
+          seen.add(o.package.packageId); return true;
+        }).map((o) => {
+          const link = o.deeplink;
+          const missing = !!apps && !apps.has((String(link).match(/^launch\/(\d+)/) || [])[1]);
+          const [r, label] = OFFER[o.monetizationType] || [2, ''];
+          return { title: o.package.clearName, sub: [label, missing && 'app not installed'].filter(Boolean).join(' \u00b7 '), thumbnail: img(o.package.icon, 's100'),
+            media_class: 'app', can_play: true, can_expand: false, _link: link, _r: r + (missing ? 10 : 0) };
+        }).sort((a, b) => a._r - b._r);
+        const ct = n.content || {}, show = n.objectType === 'SHOW';
+        return { title: ct.originalReleaseYear ? `${ct.title} (${ct.originalReleaseYear})` : ct.title, sub: show ? 'Show' : 'Movie', thumbnail: img(ct.posterUrl, 's332'),
+          media_class: show ? 'tv_show' : 'movie', can_play: offers.length > 0 && offers[0]._r < 10, can_expand: true, _offers: offers };
+      });
+      return [{ title: 'Shows', items: titles.filter((t) => t.media_class === 'tv_show') }, { title: 'Movies', items: titles.filter((t) => t.media_class === 'movie') }];
+    }
+    _watchPlay(o) {
+      const ent = this._p.entity, fam = this._family(), link = String(o._link || '');
+      if (fam === 'roku') {
+        const m = link.match(/^launch\/(\d+)(?:\?(.*))?$/); if (!m) return Promise.reject(new Error('No Roku link for this.'));
+        const q = new URLSearchParams(m[2] || ''), extra = {};
+        if (q.get('contentID')) extra.content_id = q.get('contentID');
+        if (q.get('MediaType')) extra.media_type = q.get('MediaType');
+        return this._hass.callService('media_player', 'play_media', { entity_id: ent, media_content_id: m[1], media_content_type: 'app', extra });
+      }
+      if (fam === 'androidtv') {
+        // the link lands inside an adb shell command: refuse anything that could break out of the quotes
+        if (!/^[\x21-\x7e]+$/.test(link) || link.includes("'")) return Promise.reject(new Error('Unsafe link.'));
+        return this._hass.callService('androidtv', 'adb_command', { entity_id: ent, command: `am start '${link}'` });
+      }
+      const r = this._remote();
+      return this._hass.callService('media_player', 'play_media', { entity_id: ent, media_content_id: link, media_content_type: 'url' }).then(() => {
+        // tvOS asks "Open in <app>?" before following a link; Select presses its default Open button
+        if (r) setTimeout(() => this._call('remote', 'send_command', { entity_id: r, command: 'select' }), 2000);
+      });
     }
     _canEnq() {
       const ms = this._st({ entity: this._mp() });
@@ -666,6 +742,13 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       if (!o) return s.state;
       if (o.ent !== s.entity_id || Date.now() > o.until || s.state === o.st) { this._opp = null; this._hold = null; return s.state; }
       return o.st;
+    }
+    _durOf(s) {
+      const a = s.attributes, g = this._dur;
+      if (!g || g.ent !== s.entity_id || g.app !== a.app_id) this._dur = { ent: s.entity_id, app: a.app_id, d: a.media_duration, t: 0 };
+      else if (g.d !== a.media_duration) this._dur = { ...g, d: a.media_duration, t: g.d && a.media_duration ? Date.now() : 0 };
+      // live streams like Pluto TV report a "duration" that keeps growing; Roku polls every 10 s and a real video's length never changes
+      return Date.now() - this._dur.t < 25000 ? 0 : a.media_duration;
     }
     _setHold(s, pos, play) { this._hold = { ent: s.entity_id, pos, play, at: Date.now(), upd: s.attributes.media_position_updated_at, until: Date.now() + 4000 }; }
     _livePos(s) {
@@ -829,7 +912,7 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
         const c = this._bitems[+b.dataset.k]; if (!c) return;
         const qa = e.target.closest('.qa'); if (qa) { this._enqueue(c, qa); return; }
         const playOnly = !!e.target.closest('.pl');
-        if (c.can_expand && !playOnly) { this._browse({ id: c.media_content_id, type: c.media_content_type, title: c.title }); return; }
+        if (c.can_expand && !playOnly) { this._browse(c._offers ? { id: 'watch', title: c.title, items: c._offers } : { id: c.media_content_id, type: c.media_content_type, title: c.title }); return; }
         if (c.media_class === 'app' && !c.can_play) {
           const ps = this._st(), list = (ps && ps.attributes.source_list) || [];
           if (c._source || list.includes(c.title)) this._call('media_player', 'select_source', { entity_id: this._p.entity, source: c.title });
@@ -981,7 +1064,7 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
     }
     _seekSetup(trk) {
       this._drag(trk, (f) => { this._seeking = f; this._progress(); }, (f) => {
-        const s = this._st(); const d = s && s.attributes.media_duration;
+        const s = this._st(); const d = s && this._durOf(s);
         this._seeking = null;
         if (d) {
           this._setHold(s, Math.round(f * d), this._eff(s) === 'playing');
@@ -993,8 +1076,8 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
 
     _progress() {
       const s = this._st(); if (!s || !this.$) return;
-      const a = s.attributes, d = a.media_duration;
-      if (!d) return;
+      const d = this._durOf(s);
+      if (!d) { this.$('t0').textContent = this.$('t1').textContent = ''; return; }
       let pos = this._livePos(s);
       if (this._seeking != null) pos = this._seeking * d;
       pos = Math.min(d, pos);
@@ -1113,9 +1196,10 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       $('pp').disabled = !(has(s, F.PAUSE) || has(s, F.PLAY));
       $('prev').disabled = !has(s, F.PREV); $('next').disabled = !has(s, F.NEXT);
       $('prev').style.display = has(s, F.PREV) ? '' : 'none'; $('next').style.display = has(s, F.NEXT) ? '' : 'none';
-      const d = a.media_duration;
-      $('bar').classList.toggle('on', !!d && !off && this._opt('show_progress', true) !== false);
-      $('trk').classList.toggle('ro', !has(s, F.SEEK));
+      const d = this._durOf(s), live = !d && ['playing', 'paused', 'buffering'].includes(this._eff(s));
+      $('bar').classList.toggle('on', (!!d || live) && !off && this._opt('show_progress', true) !== false);
+      $('bar').classList.toggle('live', live);
+      $('trk').classList.toggle('ro', !d || !has(s, F.SEEK));
       this._progress();
       this._lyrics(s, off);
       $('vol').style.display = this._opt('show_volume', true) === false ? 'none' : '';
@@ -1137,4 +1221,4 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
   if (!window.customCards.some((c) => c.type === 'm53-media-card'))
     window.customCards.push({ type: 'm53-media-card', name: 'M53 Media', description: 'Every player in one card: now playing, synced lyrics, library and search, and a remote.', preview: true });
 })();
-console.info('%c M53 MEDIA CARD %c 2.2.1 ', 'background:#f2a65a;color:#111;font-weight:700;border-radius:3px 0 0 3px', 'background:#333;color:#fff;border-radius:0 3px 3px 0');
+console.info('%c M53 MEDIA CARD %c 2.3.0 ', 'background:#f2a65a;color:#111;font-weight:700;border-radius:3px 0 0 3px', 'background:#333;color:#fff;border-radius:0 3px 3px 0');
