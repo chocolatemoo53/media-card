@@ -145,6 +145,10 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
 .meta{flex:1;min-width:0}
 .title{font-size:20px;font-weight:650;letter-spacing:-.015em;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sub{margin-top:3px;font-size:14px;color:var(--secondary-text-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.title.over,.sub.over{text-overflow:clip;-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 18px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 18px),transparent)}
+.title.over span,.sub.over span{display:block;width:max-content;box-sizing:content-box;padding-right:40px;animation:m53car var(--m53-cdur,10s) linear infinite;animation-play-state:var(--m53-play,running)}
+.title.over span::after,.sub.over span::after{content:attr(data-t);padding-left:40px}
+@keyframes m53car{0%,25%{transform:translateX(0)}100%{transform:translateX(-50%)}}
 .bar{margin-top:14px;display:none}
 .bar.on{display:block}
 .bar.live .fill{width:30%!important;opacity:.5}
@@ -307,7 +311,7 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
 .off .wake{display:inline-flex}
 .ctl .spacer{flex:1}
 @media (max-width:460px){.rbody{flex-direction:column;align-items:stretch}.pad{margin:0 auto}}
-@media (prefers-reduced-motion:reduce){*:not(.loader){animation:none!important;transition:none!important}}
+@media (prefers-reduced-motion:reduce){*:not(.loader){animation:none!important;transition:none!important}.title.over,.sub.over{text-overflow:ellipsis;-webkit-mask-image:none;mask-image:none}.title.over span,.sub.over span{display:inline;padding-right:0}.title.over span::after,.sub.over span::after{content:none}}
 `;
 
   function autoPlayers(hass, max) {
@@ -404,8 +408,8 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       if (!this._root) { this._root = this.attachShadow({ mode: 'open' }); this._build(); }
       this._pick(); this._render();
     }
-    connectedCallback() { this._tick = setInterval(() => { if (!document.hidden) this._progress(); }, 1000); this._stick = setInterval(() => { if (!document.hidden && this._lyOpen) this._sync(); }, 200); }
-    disconnectedCallback() { clearInterval(this._tick); clearInterval(this._stick); clearInterval(this._rep); }
+    connectedCallback() { this._tick = setInterval(() => { if (!document.hidden) this._progress(); }, 1000); this._stick = setInterval(() => { if (!document.hidden && this._lyOpen) this._sync(); }, 200); if (this._ro && this.$ && this.$('meta')) this._ro.observe(this.$('meta')); }
+    disconnectedCallback() { clearInterval(this._tick); clearInterval(this._stick); clearInterval(this._rep); if (this._ro) this._ro.disconnect(); }
 
     get _p() { return this._players.find((p) => p.entity === this._sel) || this._players[0]; }
     _mp(p = this._p) { const m = p.music_player || (this._config || {}).music_player; return m && this._hass && this._hass.states[m] ? m : p.entity; }
@@ -825,7 +829,7 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
     <button class="round pwr" id="pwr" title="Power">${svg('power')}${spin(0.4)}</button></div>
   <div class="chips" id="chips" role="tablist"></div>
   <div class="now"><div class="art" id="art">${spin(0.4)}<img id="img" alt="" decoding="async"></div>
-    <div class="meta"><div class="title" id="ti"></div><div class="sub" id="su"></div></div></div>
+    <div class="meta" id="meta"><div class="title" id="tiw"><span id="ti"></span></div><div class="sub" id="suw"><span id="su"></span></div></div></div>
   <div class="bar" id="bar"><div class="track" id="trk"><div class="fill" id="fil"></div></div>
     <div class="times"><span id="t0"></span><span id="t1"></span></div></div>
   <div class="ctl">
@@ -949,7 +953,30 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       r.querySelectorAll('.key[data-k]').forEach((b) => { b.onclick = () => this._key(b.dataset.k); });
       this._padSetup($('pad'));
       this._seekSetup($('trk'));
+      if (this._ro) this._ro.disconnect();
+      if (typeof ResizeObserver !== 'undefined') { this._ro = new ResizeObserver(() => this._fitAll()); this._ro.observe($('meta')); }
       this._built = true;
+    }
+
+    _fit(w, s, txt) {
+      const val = String(txt ?? '');
+      const cw = w.clientWidth;
+      if (s.textContent === val && w.dataset.w === String(cw)) return;
+      s.textContent = val;
+      s.dataset.t = val;
+      w.classList.remove('over');
+      w.style.removeProperty('--m53-cdur');
+      w.dataset.w = String(cw);
+      if (cw && w.scrollWidth > cw + 1) {
+        const dur = Math.max(5, (w.scrollWidth + 40) / 36 / 0.75);
+        w.style.setProperty('--m53-cdur', `${dur.toFixed(2)}s`);
+        w.classList.add('over');
+      }
+    }
+    _fitAll() {
+      if (!this.$) return;
+      this._fit(this.$('tiw'), this.$('ti'), this.$('ti').textContent);
+      this._fit(this.$('suw'), this.$('su'), this.$('su').textContent);
     }
 
     _clearBusy() { clearTimeout(this._busyT); if (this._busyEl) { this._busyEl.classList.remove('busy'); this._busyEl = null; } }
@@ -1123,7 +1150,7 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
         }).join('');
         $('chips').style.display = this._players.length > 1 ? '' : 'none';
       }
-      if (!s) { $('ti').textContent = 'Unavailable'; $('su').textContent = p.entity; return; }
+      if (!s) { this._fit($('tiw'), $('ti'), 'Unavailable'); this._fit($('suw'), $('su'), p.entity); return; }
       const a = s.attributes, st = s.state;
       const off = ['off', 'unavailable', 'unknown', 'standby'].includes(st);
       card.classList.toggle('off', off);
@@ -1156,7 +1183,7 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       }
       if (!sub && !off && a.app_name && a.media_title) sub = a.app_name;
       if (!sub && off) sub = this._name(p);
-      $('ti').textContent = title; $('su').textContent = sub;
+      this._fit($('tiw'), $('ti'), title); this._fit($('suw'), $('su'), sub);
       const pic = !off && a.entity_picture ? a.entity_picture : '';
       const artMode = this._opt('art', 'auto');
       const isApp = a.media_content_type === 'app' || (!a.media_title && !!(a.app_name || a.app_id));
