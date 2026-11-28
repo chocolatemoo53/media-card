@@ -742,9 +742,9 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
       return o.st;
     }
     _durOf(s) {
-      const a = s.attributes, g = this._dur;
-      if (!g || g.ent !== s.entity_id || g.app !== a.app_id) this._dur = { ent: s.entity_id, app: a.app_id, d: a.media_duration, t: 0 };
-      else if (g.d !== a.media_duration) this._dur = { ...g, d: a.media_duration, t: g.d && a.media_duration ? Date.now() : 0 };
+      const a = s.attributes, g = this._dur, sig = `${s.entity_id}|${a.app_id}|${a.media_content_id}|${a.media_title}`;
+      if (!g || g.sig !== sig) this._dur = { sig, d: a.media_duration, t: 0 };
+      else if (g.d !== a.media_duration) this._dur = { ...g, d: a.media_duration, t: g.d && a.media_duration > g.d ? Date.now() : g.t };
       return Date.now() - this._dur.t < 25000 ? 0 : a.media_duration;
     }
     _setHold(s, pos, play) { this._hold = { ent: s.entity_id, pos, play, at: Date.now(), upd: s.attributes.media_position_updated_at, until: Date.now() + 4000 }; }
@@ -1097,6 +1097,7 @@ button.busy>.ic,.pp.busy .ic{opacity:0!important}
     _progress() {
       const s = this._st(); if (!s || !this.$) return;
       const d = this._durOf(s);
+      this.$('bar').classList.toggle('live', !d);
       if (!d) { this.$('t0').textContent = this.$('t1').textContent = ''; return; }
       let pos = this._livePos(s);
       if (this._seeking != null) pos = this._seeking * d;
